@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>アルバム作成 最小サンプル</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    background: #f5f4f0;
+    color: #1a1a18;
+    padding: 16px;
+    padding-bottom: 60px;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  h2 { font-size: 14px; margin: 24px 0 10px; color: #5f5e5a; }
+  p.sub { font-size: 13px; color: #5f5e5a; margin-bottom: 12px; }
+
+  .spot-pick {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    max-width: 480px;
+  }
+  .spot-pick img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  .spot-pick .info { font-size: 12px; color: #5f5e5a; line-height: 1.5; overflow: hidden; }
+  .spot-pick .info .memo { color: #1a1a18; font-size: 13px; }
+  .spot-pick input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; }
+
+  input[type="text"] {
+    width: 100%;
+    max-width: 480px;
+    font-size: 15px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 0.5px solid rgba(0,0,0,0.2);
+    background: #fff;
+    color: #1a1a18;
+    display: block;
+    margin-bottom: 12px;
+  }
+  button {
+    background: #2a7a4b;
+    color: #fff;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    margin-right: 8px;
+    margin-bottom: 12px;
+  }
+  button.danger { background: #b93a1a; }
+  button:disabled { background: #999; }
+
+  .album-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    max-width: 480px;
+  }
+  .album-card h3 { font-size: 15px; margin-bottom: 4px; }
+  .album-meta { font-size: 12px; color: #5f5e5a; margin-bottom: 10px; }
+  .album-photos {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .album-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+
+  #emptySpots, #emptyAlbums { font-size: 13px; color: #5f5e5a; }
+</style>
+</head>
+<body>
+
+<h1>アルバム作成 最小サンプル</h1>
+
+<h2>記録から選ぶ</h2>
+<p class="sub" id="spotIntro"></p>
+<div id="spotPickList"></div>
+<p id="emptySpots" style="display:none;">記録がありません。先に <a href="06_walk-record-demo.html">街歩き記録デモ</a> で写真を撮ってください。</p>
+
+<h2>タイトルをつけて作成</h2>
+<input type="text" id="albumTitle" placeholder="例: ○○町歴史散歩" />
+<button id="createAlbumBtn">選択した写真でアルバムを作成</button>
+
+<h2>作成済みアルバム</h2>
+<div id="albumList"></div>
+<p id="emptyAlbums" style="display:none;">まだアルバムがありません。</p>
+
+<script>
+  const SPOTS_KEY = 'machilog_walk_demo_spots';
+  const ALBUMS_KEY = 'machilog_albums_demo';
+
+  const spots = JSON.parse(localStorage.getItem(SPOTS_KEY) || '[]');
+  let albums = JSON.parse(localStorage.getItem(ALBUMS_KEY) || '[]');
+
+  const spotPickList = document.getElementById('spotPickList');
+  const emptySpots = document.getElementById('emptySpots');
+  const spotIntro = document.getElementById('spotIntro');
+  const albumTitle = document.getElementById('albumTitle');
+  const createAlbumBtn = document.getElementById('createAlbumBtn');
+  const albumList = document.getElementById('albumList');
+  const emptyAlbums = document.getElementById('emptyAlbums');
+
+  // ---- 記録一覧をチェックボックス付きで表示(新しいものが上) ----
+  function renderSpotPicks() {
+    const ordered = [...spots].reverse();
+    spotIntro.textContent = spots.length + '件の記録があります。アルバムに入れたい写真を選んでください。';
+    emptySpots.style.display = spots.length === 0 ? 'block' : 'none';
+
+    spotPickList.innerHTML = '';
+    ordered.forEach((spot) => {
+      const row = document.createElement('label');
+      row.className = 'spot-pick';
+      const time = new Date(spot.timestamp).toLocaleString('ja-JP');
+      row.innerHTML =
+        '<input type="checkbox" value="' + spot.id + '" />' +
+        '<img src="' + spot.photo + '" alt="記録した写真" />' +
+        '<div class="info">' + time +
+          '<div class="memo">' + (spot.memo ? escapeHtml(spot.memo).slice(0, 40) : '(メモなし)') + '</div>' +
+        '</div>';
+      spotPickList.appendChild(row);
+    });
+  }
+
+  // ---- アルバム作成 ----
+  createAlbumBtn.addEventListener('click', () => {
+    const title = albumTitle.value.trim();
+    if (!title) {
+      alert('アルバムのタイトルを入力してください。');
+      return;
+    }
+
+    const checked = [...spotPickList.querySelectorAll('input[type="checkbox"]:checked')]
+      .map((cb) => Number(cb.value));
+
+    if (checked.length === 0) {
+      alert('写真を1枚以上選んでください。');
+      return;
+    }
+
+    // 選んだ時点の写真・メモ・位置情報をそのままアルバムに複製して保存する
+    // (あとで元の記録が消えても、アルバムの内容は独立して残るようにするため)
+    const selectedSpots = spots.filter((s) => checked.includes(s.id));
+
+    const album = {
+      id: Date.now(),
+      title: title,
+      createdAt: new Date().toISOString(),
+      spots: selectedSpots
+    };
+    albums.push(album);
+    localStorage.setItem(ALBUMS_KEY, JSON.stringify(albums));
+
+    albumTitle.value = '';
+    renderSpotPicks();
+    renderAlbums();
+  });
+
+  // ---- 作成済みアルバムの表示 ----
+  function renderAlbums() {
+    emptyAlbums.style.display = albums.length === 0 ? 'block' : 'none';
+    albumList.innerHTML = '';
+
+    [...albums].reverse().forEach((album) => {
+      const card = document.createElement('div');
+      card.className = 'album-card';
+
+      const created = new Date(album.createdAt).toLocaleString('ja-JP');
+      const photosHtml = album.spots.map((s) =>
+        '<img src="' + s.photo + '" alt="' + escapeHtml(album.title) + '" />'
+      ).join('');
+
+      card.innerHTML =
+        '<h3>' + escapeHtml(album.title) + '</h3>' +
+        '<div class="album-meta">作成日: ' + created + ' / 写真 ' + album.spots.length + '枚</div>' +
+        '<div class="album-photos">' + photosHtml + '</div>' +
+        '<button class="danger" data-id="' + album.id + '">このアルバムを削除</button>';
+
+      albumList.appendChild(card);
+    });
+
+    albumList.querySelectorAll('button[data-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        if (!confirm('このアルバムを削除します。よろしいですか？')) return;
+        albums = albums.filter((a) => a.id !== id);
+        localStorage.setItem(ALBUMS_KEY, JSON.stringify(albums));
+        renderAlbums();
+      });
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  renderSpotPicks();
+  renderAlbums();
+</script>
+
+</body>
+</html>
