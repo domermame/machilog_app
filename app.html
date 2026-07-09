@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>MachiLog</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -116,7 +118,32 @@
   }
   .album-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
 
-  #emptySpots, #emptyAlbums { font-size: 13px; color: #5f5e5a; }
+  #emptySpots, #emptyAlbums, #emptyWalks { font-size: 13px; color: #5f5e5a; }
+
+  #routeMap {
+    height: 300px;
+    width: 100%;
+    max-width: 480px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+  #routeStatus {
+    font-size: 13px;
+    color: #5f5e5a;
+    margin-bottom: 12px;
+  }
+  .walk-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    max-width: 480px;
+    font-size: 13px;
+    color: #5f5e5a;
+    cursor: pointer;
+  }
+  .walk-card .walk-title { color: #1a1a18; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .walk-card.selected { outline: 2px solid #2a7a4b; }
 
   /* ---- 下部タブバー ---- */
   .tabbar {
@@ -170,6 +197,17 @@
   <canvas id="canvas"></canvas>
 </section>
 
+<!-- ============ ルートタブ ============ -->
+<section id="tab-route" class="tab-panel">
+  <p id="routeStatus">「散歩スタート」を押すと、歩いた道を記録します。</p>
+  <button id="walkToggleBtn">散歩スタート</button>
+  <div id="routeMap"></div>
+
+  <h2>過去の散歩</h2>
+  <div id="walkList"></div>
+  <p id="emptyWalks">まだ記録した散歩ルートがありません。</p>
+</section>
+
 <!-- ============ 記録一覧タブ ============ -->
 <section id="tab-list" class="tab-panel">
   <h2>記録した場所(<span id="spotCount">0</span>件)</h2>
@@ -196,6 +234,7 @@
 <!-- ============ 下部タブバー ============ -->
 <nav class="tabbar">
   <button data-tab="record" class="active">📷 撮る</button>
+  <button data-tab="route">🗺 ルート</button>
   <button data-tab="list">📋 記録一覧</button>
   <button data-tab="album">📖 アルバム</button>
 </nav>
@@ -203,14 +242,17 @@
 <script>
   const STORAGE_KEY = 'machilog_walk_demo_spots';
   const ALBUMS_KEY = 'machilog_albums_demo';
+  const WALKS_KEY = 'machilog_walks_demo';
 
   let spots = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
   let albums = JSON.parse(localStorage.getItem(ALBUMS_KEY) || '[]');
+  let walks = JSON.parse(localStorage.getItem(WALKS_KEY) || '[]');
 
   // ============ タブ切り替え ============
   const tabButtons = document.querySelectorAll('.tabbar button');
   const tabPanels = {
     record: document.getElementById('tab-record'),
+    route: document.getElementById('tab-route'),
     list: document.getElementById('tab-list'),
     album: document.getElementById('tab-album')
   };
@@ -232,6 +274,12 @@
       // 一覧・アルバムタブは開くたびに最新のデータで再描画する
       if (target === 'list') renderSpots();
       if (target === 'album') { renderSpotPicks(); renderAlbums(); }
+      // ルートタブは、地図(Leaflet)が非表示状態では正しく初期化できないため、表示された時に初期化・サイズ再計算する
+      if (target === 'route') {
+        initRouteMapIfNeeded();
+        setTimeout(() => routeMap.invalidateSize(), 0);
+        renderWalks();
+      }
     });
   });
 
@@ -276,6 +324,7 @@
         lastPosition = pos.coords;
         gpsStatus.textContent = '位置情報 取得済み (精度 約' + Math.round(pos.coords.accuracy) + 'm)';
         gpsStatus.classList.remove('waiting');
+        maybeAddRoutePoint(pos.coords);
       },
       (err) => { gpsStatus.textContent = '位置情報 取得失敗: ' + err.message; },
       { enableHighAccuracy: true }
@@ -380,6 +429,144 @@
     micBtn.addEventListener('click', () => {
       if (isListening) recognition.stop();
       else recognition.start();
+    });
+  }
+
+  // ============ ルートタブ: 散歩ルート記録 ============
+  const walkToggleBtn = document.getElementById('walkToggleBtn');
+  const routeStatus = document.getElementById('routeStatus');
+  const walkList = document.getElementById('walkList');
+  const emptyWalks = document.getElementById('emptyWalks');
+
+  let routeMap = null;
+  let routePolyline = null;
+  let currentWalk = null; // 記録中の散歩 { id, startedAt, path: [{lat,lng,t}] }
+  let selectedWalkId = null; // 一覧から選んで地図表示中の過去の散歩
+
+  // 2点間の距離をメートルで計算(緯度経度から距離を出す定番の式)
+  function haversineMeters(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function pathDistance(path) {
+    let total = 0;
+    for (let i = 1; i < path.length; i++) {
+      total += haversineMeters(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+    }
+    return total;
+  }
+
+  function formatDistance(meters) {
+    return meters >= 1000 ? (meters / 1000).toFixed(2) + 'km' : Math.round(meters) + 'm';
+  }
+
+  // 地図(Leaflet)は非表示のdivに対して初期化すると崩れるため、ルートタブが最初に開かれた時に初期化する
+  function initRouteMapIfNeeded() {
+    if (routeMap) return;
+    routeMap = L.map('routeMap').setView([35.681236, 139.767125], 15); // 初期表示は東京駅付近
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(routeMap);
+    routePolyline = L.polyline([], { color: '#2a7a4b' }).addTo(routeMap);
+
+    if (lastPosition) {
+      routeMap.setView([lastPosition.latitude, lastPosition.longitude], 16);
+    }
+  }
+
+  // 記録中の散歩に、意味のある間隔でだけ地点を追加する(密集しすぎないよう間引く)
+  function maybeAddRoutePoint(coords) {
+    if (!currentWalk) return;
+    const now = Date.now();
+    const last = currentWalk.path[currentWalk.path.length - 1];
+
+    if (last) {
+      const distFromLast = haversineMeters(last.lat, last.lng, coords.latitude, coords.longitude);
+      const timeSinceLast = now - last.t;
+      // 10m以上動く、または15秒以上経過した場合だけ新しい点を追加する
+      if (distFromLast < 10 && timeSinceLast < 15000) return;
+    }
+
+    currentWalk.path.push({ lat: coords.latitude, lng: coords.longitude, t: now });
+    updateRouteLive();
+  }
+
+  function updateRouteLive() {
+    const dist = pathDistance(currentWalk.path);
+    routeStatus.textContent = '記録中… ' + currentWalk.path.length + '地点 / 距離 約' + formatDistance(dist);
+
+    if (routeMap) {
+      const latlngs = currentWalk.path.map((p) => [p.lat, p.lng]);
+      routePolyline.setLatLngs(latlngs);
+      if (latlngs.length > 0) routeMap.panTo(latlngs[latlngs.length - 1]);
+    }
+  }
+
+  walkToggleBtn.addEventListener('click', () => {
+    initRouteMapIfNeeded();
+
+    if (!currentWalk) {
+      // 散歩スタート
+      currentWalk = { id: Date.now(), startedAt: new Date().toISOString(), path: [] };
+      if (lastPosition) {
+        currentWalk.path.push({ lat: lastPosition.latitude, lng: lastPosition.longitude, t: Date.now() });
+      }
+      routePolyline.setLatLngs([]);
+      walkToggleBtn.textContent = '散歩終了';
+      walkToggleBtn.classList.add('danger');
+      updateRouteLive();
+    } else {
+      // 散歩終了 → 保存
+      if (currentWalk.path.length < 2) {
+        alert('記録された地点が少ないため保存しません(移動しながらもう一度お試しください)。');
+      } else {
+        const walk = {
+          id: currentWalk.id,
+          startedAt: currentWalk.startedAt,
+          endedAt: new Date().toISOString(),
+          path: currentWalk.path,
+          distance: pathDistance(currentWalk.path)
+        };
+        walks.push(walk);
+        localStorage.setItem(WALKS_KEY, JSON.stringify(walks));
+      }
+      currentWalk = null;
+      walkToggleBtn.textContent = '散歩スタート';
+      walkToggleBtn.classList.remove('danger');
+      routeStatus.textContent = '「散歩スタート」を押すと、歩いた道を記録します。';
+      renderWalks();
+    }
+  });
+
+  function showWalkOnMap(walk) {
+    selectedWalkId = walk.id;
+    const latlngs = walk.path.map((p) => [p.lat, p.lng]);
+    routePolyline.setLatLngs(latlngs);
+    if (latlngs.length > 0) {
+      routeMap.fitBounds(routePolyline.getBounds(), { padding: [20, 20] });
+    }
+    renderWalks();
+  }
+
+  function renderWalks() {
+    emptyWalks.style.display = walks.length === 0 ? 'block' : 'none';
+    walkList.innerHTML = '';
+
+    [...walks].reverse().forEach((walk) => {
+      const card = document.createElement('div');
+      card.className = 'walk-card' + (walk.id === selectedWalkId ? ' selected' : '');
+      const started = new Date(walk.startedAt).toLocaleString('ja-JP');
+      card.innerHTML =
+        '<div class="walk-title">' + started + '</div>' +
+        '距離 約' + formatDistance(walk.distance) + ' / ' + walk.path.length + '地点(タップで地図表示)';
+      card.addEventListener('click', () => showWalkOnMap(walk));
+      walkList.appendChild(card);
     });
   }
 
