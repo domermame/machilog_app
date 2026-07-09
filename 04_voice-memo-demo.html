@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>音声メモ最小サンプル</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    background: #f5f4f0;
+    color: #1a1a18;
+    padding: 16px;
+  }
+  h1 { font-size: 18px; margin-bottom: 12px; }
+  #status { font-size: 13px; color: #5f5e5a; margin-bottom: 12px; }
+  button {
+    background: #2a7a4b;
+    color: #fff;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    margin-right: 8px;
+    margin-bottom: 12px;
+  }
+  button:disabled { background: #999; }
+  #recordBtn.recording { background: #b93a1a; }
+  audio {
+    width: 100%;
+    max-width: 480px;
+    display: none;
+    margin-bottom: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1>音声メモ最小サンプル</h1>
+<p id="status">「録音開始」を押してください。</p>
+
+<button id="recordBtn">録音開始</button>
+<button id="stopBtn" disabled>録音停止</button>
+
+<!-- 録音した音声を再生するプレーヤー -->
+<audio id="player" controls></audio>
+
+<script>
+  const recordBtn = document.getElementById('recordBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const player = document.getElementById('player');
+  const status = document.getElementById('status');
+
+  let mediaRecorder = null;
+  let chunks = [];
+
+  recordBtn.addEventListener('click', async () => {
+    try {
+      // マイクの音声ストリームを取得
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // MediaRecorderで録音を開始する
+      mediaRecorder = new MediaRecorder(stream);
+      chunks = [];
+
+      // 録音データは一定間隔で少しずつ渡されるので、配列に貯めていく
+      mediaRecorder.addEventListener('dataavailable', (e) => {
+        chunks.push(e.data);
+      });
+
+      // 録音停止時に、貯めたデータを1つの音声ファイル(Blob)にまとめて再生できるようにする
+      mediaRecorder.addEventListener('stop', () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        player.src = URL.createObjectURL(blob);
+        player.style.display = 'block';
+
+        // マイクを使い終わったらストリームを止めておく(録音中アイコンを消すため)
+        stream.getTracks().forEach((track) => track.stop());
+
+        status.textContent = '録音が完了しました。再生して確認できます。';
+      });
+
+      mediaRecorder.start();
+      status.textContent = '録音中…';
+      recordBtn.disabled = true;
+      recordBtn.classList.add('recording');
+      stopBtn.disabled = false;
+      player.style.display = 'none';
+    } catch (err) {
+      status.textContent = 'マイクを起動できませんでした: ' + err.message;
+    }
+  });
+
+  stopBtn.addEventListener('click', () => {
+    mediaRecorder.stop();
+    recordBtn.disabled = false;
+    recordBtn.classList.remove('recording');
+    recordBtn.textContent = 'もう一度録音する';
+    stopBtn.disabled = true;
+  });
+</script>
+
+</body>
+</html>
