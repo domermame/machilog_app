@@ -60,25 +60,34 @@
       // マイクの音声ストリームを取得
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // MediaRecorderで録音を開始する
-      mediaRecorder = new MediaRecorder(stream);
+      // iPhone SafariはWebMに対応していないため、対応形式を順に確認して選ぶ
+      // (Safariは主にaudio/mp4、Chromeは主にaudio/webmが使われる)
+      const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/aac'];
+      const supportedType = candidates.find((t) => MediaRecorder.isTypeSupported(t));
+
+      mediaRecorder = new MediaRecorder(stream, supportedType ? { mimeType: supportedType } : undefined);
       chunks = [];
 
       // 録音データは一定間隔で少しずつ渡されるので、配列に貯めていく
       mediaRecorder.addEventListener('dataavailable', (e) => {
-        chunks.push(e.data);
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      });
+
+      mediaRecorder.addEventListener('error', (e) => {
+        status.textContent = '録音中にエラーが発生しました: ' + e.error;
       });
 
       // 録音停止時に、貯めたデータを1つの音声ファイル(Blob)にまとめて再生できるようにする
+      // 実際に録音された形式(mediaRecorder.mimeType)をそのままBlobのtypeに使うのがポイント
       mediaRecorder.addEventListener('stop', () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/mp4' });
         player.src = URL.createObjectURL(blob);
         player.style.display = 'block';
 
         // マイクを使い終わったらストリームを止めておく(録音中アイコンを消すため)
         stream.getTracks().forEach((track) => track.stop());
 
-        status.textContent = '録音が完了しました。再生して確認できます。';
+        status.textContent = '録音が完了しました(形式: ' + (mediaRecorder.mimeType || '不明') + ')。再生して確認できます。';
       });
 
       mediaRecorder.start();
