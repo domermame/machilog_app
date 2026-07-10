@@ -7,27 +7,76 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
+  :root {
+    --color-bg: #ffffff;
+    --color-bg-secondary: #f5f4f0;
+    --color-bg-info: #e8f4ec;
+    --color-text-primary: #1a1a18;
+    --color-text-secondary: #5f5e5a;
+    --color-text-info: #1a5e35;
+    --color-border: rgba(0,0,0,0.10);
+    --color-border-md: rgba(0,0,0,0.20);
+    --color-green-bg: #e8f4ec;
+    --color-green: #2a7a4b;
+    --color-green-text: #1a5e35;
+    --color-amber-bg: #fdf3e1;
+    --color-amber: #b97a1a;
+    --color-danger: #b93a1a;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: #1c1c1a;
+      --color-bg-secondary: #252523;
+      --color-bg-info: #0a2e18;
+      --color-text-primary: #f0ede8;
+      --color-text-secondary: #b4b2a9;
+      --color-text-info: #6fcf97;
+      --color-border: rgba(255,255,255,0.10);
+      --color-border-md: rgba(255,255,255,0.20);
+      --color-green-bg: #0a2e18;
+      --color-green: #5dcf8a;
+      --color-green-text: #8de4ad;
+      --color-amber-bg: #2e1f06;
+      --color-amber: #f0b84a;
+      --color-danger: #e05a3a;
+    }
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, "Hiragino Sans", sans-serif;
-    background: #f5f4f0;
-    color: #1a1a18;
-    padding: 16px;
-    padding-bottom: 84px; /* 下部タブバーの分だけ余白 */
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+    padding: 0 16px;
+    padding-bottom: 88px; /* 下部タブバーの分だけ余白 */
   }
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  h2 { font-size: 14px; margin: 20px 0 10px; color: #5f5e5a; }
-  #status { font-size: 13px; color: #5f5e5a; margin-bottom: 12px; }
+
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    margin: 0 -16px 16px;
+    padding: max(14px, env(safe-area-inset-top)) 16px 14px;
+    background: var(--color-bg);
+    border-bottom: 0.5px solid var(--color-border);
+  }
+  .appbar h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  .appbar .tagline { font-size: 11px; color: var(--color-text-secondary); margin-top: 1px; }
+
+  h2 { font-size: 13px; font-weight: 600; margin: 22px 0 10px; color: var(--color-text-secondary); }
+  #status { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 12px; }
   #gpsStatus {
     font-size: 12px;
     display: inline-block;
     padding: 4px 10px;
     border-radius: 20px;
-    background: #e8f4ec;
-    color: #1a5e35;
+    background: var(--color-green-bg);
+    color: var(--color-green-text);
     margin-bottom: 12px;
   }
-  #gpsStatus.waiting { background: #fdf3e1; color: #b97a1a; }
+  #gpsStatus.waiting { background: var(--color-amber-bg); color: var(--color-amber); }
 
   section.tab-panel { display: none; }
   section.tab-panel.active { display: block; }
@@ -35,53 +84,43 @@
   #video, #capturedPhoto {
     width: 100%;
     max-width: 480px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     background: #000;
     display: block;
     margin-bottom: 12px;
   }
   button {
-    background: #2a7a4b;
+    background: var(--color-green);
     color: #fff;
     border: none;
-    padding: 12px 20px;
-    border-radius: 8px;
+    padding: 13px 22px;
+    border-radius: var(--radius-md);
     font-size: 15px;
     font-weight: 600;
     margin-right: 8px;
     margin-bottom: 12px;
+    transition: opacity 0.15s;
   }
-  button.secondary { background: #7a7a76; }
-  button.danger { background: #b93a1a; }
+  button:active { opacity: 0.8; }
+  button.secondary { background: var(--color-bg); color: var(--color-text-primary); border: 0.5px solid var(--color-border-md); }
+  button.danger { background: var(--color-danger); }
   button:disabled { background: #999; }
-  #micBtn.recording { background: #b93a1a; }
+  #micBtn.recording { background: var(--color-danger); }
 
-  textarea {
+  textarea, input[type="text"] {
     width: 100%;
     max-width: 480px;
-    min-height: 100px;
     font-size: 15px;
     line-height: 1.7;
     padding: 12px;
-    border-radius: 8px;
-    border: 0.5px solid rgba(0,0,0,0.2);
-    background: #fff;
-    color: #1a1a18;
+    border-radius: var(--radius-md);
+    border: 0.5px solid var(--color-border-md);
+    background: var(--color-bg);
+    color: var(--color-text-primary);
     display: block;
     margin-bottom: 8px;
   }
-  input[type="text"] {
-    width: 100%;
-    max-width: 480px;
-    font-size: 15px;
-    padding: 12px;
-    border-radius: 8px;
-    border: 0.5px solid rgba(0,0,0,0.2);
-    background: #fff;
-    color: #1a1a18;
-    display: block;
-    margin-bottom: 12px;
-  }
+  textarea { min-height: 100px; }
 
   #editPanel { display: none; }
   canvas { display: none; }
@@ -90,86 +129,104 @@
     display: flex;
     gap: 12px;
     align-items: center;
-    background: #fff;
-    border-radius: 8px;
+    background: var(--color-bg);
+    border: 0.5px solid var(--color-border);
+    border-radius: var(--radius-lg);
     padding: 10px;
     margin-bottom: 8px;
     max-width: 480px;
   }
-  .spot-card img, .spot-pick img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
-  .spot-info, .spot-pick .info { font-size: 12px; color: #5f5e5a; line-height: 1.6; overflow: hidden; }
-  .spot-info .memo, .spot-pick .info .memo { color: #1a1a18; font-size: 13px; margin-top: 4px; }
-  .spot-pick input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; }
+  .spot-card img, .spot-pick img { width: 70px; height: 70px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+  .spot-info, .spot-pick .info { font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; overflow: hidden; }
+  .spot-info .memo, .spot-pick .info .memo { color: var(--color-text-primary); font-size: 13px; margin-top: 4px; }
+  .spot-pick input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--color-green); }
 
   .album-card {
-    background: #fff;
-    border-radius: 10px;
+    background: var(--color-bg);
+    border: 0.5px solid var(--color-border);
+    border-radius: var(--radius-lg);
     padding: 14px;
     margin-bottom: 14px;
     max-width: 480px;
   }
-  .album-card h3 { font-size: 15px; margin-bottom: 4px; }
-  .album-meta { font-size: 12px; color: #5f5e5a; margin-bottom: 10px; }
+  .album-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .album-meta { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 10px; }
   .album-photos {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 6px;
     margin-bottom: 10px;
   }
-  .album-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+  .album-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
 
-  #emptySpots, #emptyAlbums, #emptyWalks { font-size: 13px; color: #5f5e5a; }
+  #emptySpots, #emptyAlbums, #emptyWalks {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    max-width: 480px;
+    padding: 20px 16px;
+    text-align: center;
+    background: var(--color-bg);
+    border: 0.5px dashed var(--color-border-md);
+    border-radius: var(--radius-lg);
+  }
 
   #routeMap {
     height: 300px;
     width: 100%;
     max-width: 480px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     margin-bottom: 12px;
+    border: 0.5px solid var(--color-border);
   }
   #routeStatus {
     font-size: 13px;
-    color: #5f5e5a;
+    color: var(--color-text-secondary);
     margin-bottom: 12px;
   }
   .walk-card {
-    background: #fff;
-    border-radius: 8px;
+    background: var(--color-bg);
+    border: 0.5px solid var(--color-border);
+    border-radius: var(--radius-lg);
     padding: 10px 14px;
     margin-bottom: 8px;
     max-width: 480px;
     font-size: 13px;
-    color: #5f5e5a;
+    color: var(--color-text-secondary);
     cursor: pointer;
   }
-  .walk-card .walk-title { color: #1a1a18; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
-  .walk-card.selected { outline: 2px solid #2a7a4b; }
+  .walk-card .walk-title { color: var(--color-text-primary); font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .walk-card.selected { outline: 2px solid var(--color-green); }
 
   /* ---- 下部タブバー ---- */
   .tabbar {
     position: fixed;
     left: 0; right: 0; bottom: 0;
     display: flex;
-    background: #fff;
-    border-top: 0.5px solid rgba(0,0,0,0.15);
-    padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+    background: var(--color-bg);
+    border-top: 0.5px solid var(--color-border);
+    padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+    gap: 4px;
   }
   .tabbar button {
     flex: 1;
     margin: 0;
     background: none;
-    color: #5f5e5a;
-    border-radius: 0;
-    font-size: 12px;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    font-size: 11px;
     font-weight: 500;
     padding: 8px 4px;
   }
-  .tabbar button.active { color: #2a7a4b; font-weight: 700; }
+  .tabbar button:active { opacity: 1; background: var(--color-bg-secondary); }
+  .tabbar button.active { color: var(--color-green-text); font-weight: 700; background: var(--color-green-bg); }
 </style>
 </head>
 <body>
 
-<h1>MachiLog</h1>
+<header class="appbar">
+  <h1>MachiLog</h1>
+  <p class="tagline">街歩きの記録アプリ</p>
+</header>
 
 <!-- ============ 撮るタブ ============ -->
 <section id="tab-record" class="tab-panel active">
@@ -183,7 +240,7 @@
 
   <div id="editPanel">
     <img id="capturedPhoto" alt="撮影した写真" />
-    <p id="editInfo" style="font-size:13px; color:#5f5e5a; margin-bottom:8px;"></p>
+    <p id="editInfo" style="font-size:13px; color:var(--color-text-secondary); margin-bottom:8px;"></p>
 
     <button id="micBtn">音声入力開始</button>
     <textarea id="memo" placeholder="メモ内容(音声入力 or 手入力)"></textarea>
@@ -219,7 +276,7 @@
 <!-- ============ アルバムタブ ============ -->
 <section id="tab-album" class="tab-panel">
   <h2>記録から選ぶ</h2>
-  <p id="spotIntro" style="font-size:13px; color:#5f5e5a; margin-bottom:12px;"></p>
+  <p id="spotIntro" style="font-size:13px; color:var(--color-text-secondary); margin-bottom:12px;"></p>
   <div id="spotPickList"></div>
 
   <h2>タイトルをつけて作成</h2>
