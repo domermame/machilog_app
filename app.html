@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MachiLog</title>
+<title>街歩きログ</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -84,10 +84,26 @@
   #video, #capturedPhoto {
     width: 100%;
     max-width: 480px;
+    max-height: 45vh;
+    object-fit: cover;
     border-radius: var(--radius-lg);
     background: #000;
     display: block;
     margin-bottom: 12px;
+  }
+
+  /* 「この場所を撮影する」ボタンは、映像の高さに関わらずタブバーの上に常に表示する
+     (画面の小さいiPhoneでスクロールしないと押せない問題への対応) */
+  #shootBtn {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    z-index: 15;
+    margin: 0;
+    border-radius: 999px;
+    padding: 16px 30px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
   button {
     background: var(--color-green);
@@ -139,7 +155,36 @@
   .spot-card img, .spot-pick img { width: 70px; height: 70px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
   .spot-info, .spot-pick .info { font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; overflow: hidden; }
   .spot-info .memo, .spot-pick .info .memo { color: var(--color-text-primary); font-size: 13px; margin-top: 4px; }
-  .spot-pick input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--color-green); }
+  .spot-pick input[type="checkbox"], .spot-card input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--color-green); }
+  .spot-thumb { position: relative; flex-shrink: 0; }
+  .spot-number {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    background: var(--color-green);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 999px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  /* ルート地図上の番号ピン(Leaflet divIcon) */
+  .spot-pin {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--color-green);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    border: 2px solid var(--color-bg);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  }
 
   .album-card {
     background: var(--color-bg);
@@ -224,13 +269,13 @@
 <body>
 
 <header class="appbar">
-  <h1>MachiLog</h1>
+  <h1>街歩きログ</h1>
   <p class="tagline">街歩きの記録アプリ</p>
 </header>
 
 <!-- ============ 撮るタブ ============ -->
-<section id="tab-record" class="tab-panel active">
-  <p id="status">カメラを起動しています…</p>
+<section id="tab-record" class="tab-panel">
+  <p id="status">「撮る」タブを開くとカメラが起動します。</p>
   <span id="gpsStatus" class="waiting">位置情報 取得中…</span>
 
   <div id="cameraPanel">
@@ -255,7 +300,7 @@
 </section>
 
 <!-- ============ ルートタブ ============ -->
-<section id="tab-route" class="tab-panel">
+<section id="tab-route" class="tab-panel active">
   <p id="routeStatus">「散歩スタート」を押すと、歩いた道を記録します。</p>
   <button id="walkToggleBtn">散歩スタート</button>
   <div id="routeMap"></div>
@@ -270,7 +315,10 @@
   <h2>記録した場所(<span id="spotCount">0</span>件)</h2>
   <div id="spotList"></div>
   <p id="emptySpots">まだ記録がありません。「撮る」タブから記録してください。</p>
-  <button id="clearAllBtn" class="danger">全記録をクリア</button>
+  <div>
+    <button id="deleteSelectedBtn" class="danger">選択した記録を削除</button>
+    <button id="clearAllBtn" class="secondary">全記録をクリア</button>
+  </div>
 </section>
 
 <!-- ============ アルバムタブ ============ -->
@@ -290,8 +338,8 @@
 
 <!-- ============ 下部タブバー ============ -->
 <nav class="tabbar">
-  <button data-tab="record" class="active">📷 撮る</button>
-  <button data-tab="route">🗺 ルート</button>
+  <button data-tab="route" class="active">🗺 ルート</button>
+  <button data-tab="record">📷 撮る</button>
   <button data-tab="list">📋 記録一覧</button>
   <button data-tab="album">📖 アルバム</button>
 </nav>
@@ -304,6 +352,12 @@
   let spots = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
   let albums = JSON.parse(localStorage.getItem(ALBUMS_KEY) || '[]');
   let walks = JSON.parse(localStorage.getItem(WALKS_KEY) || '[]');
+
+  // 番号付けを追加する前に保存された記録には#番号がないため、記録した順番で振り直す
+  if (spots.some((s) => !s.number)) {
+    spots.forEach((s, i) => { s.number = i + 1; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(spots));
+  }
 
   // ============ タブ切り替え ============
   const tabButtons = document.querySelectorAll('.tabbar button');
@@ -338,6 +392,7 @@
         initRouteMapIfNeeded();
         setTimeout(() => routeMap.invalidateSize(), 0);
         renderWalks();
+        renderSpotMarkers();
       }
     });
   });
@@ -361,10 +416,17 @@
   let pendingPhotoDataUrl = null;
   let pendingPosition = null;
   let pendingTimestamp = null;
+  let pendingNumber = null;
   let cameraStream = null;
+
+  // 記録済みスポットの最大番号+1を返す(削除があっても番号が重複しないようにするため)
+  function nextSpotNumber() {
+    return spots.reduce((max, s) => Math.max(max, s.number || 0), 0) + 1;
+  }
 
   function startCamera() {
     cameraStarted = true;
+    status.textContent = 'カメラを起動しています…';
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' } },
       audio: false
@@ -390,7 +452,7 @@
     shootBtn.disabled = true;
   }
 
-  startCamera(); // 最初のタブなので即起動
+  // カメラは「撮る」タブが最初に開かれた時だけ起動する(初期表示はルートタブのため)
 
   if (navigator.geolocation) {
     navigator.geolocation.watchPosition(
@@ -417,11 +479,13 @@
     pendingPhotoDataUrl = canvas.toDataURL('image/jpeg', 0.75);
     pendingPosition = lastPosition;
     pendingTimestamp = new Date().toISOString();
+    pendingNumber = nextSpotNumber();
 
     capturedPhoto.src = pendingPhotoDataUrl;
-    editInfo.textContent = pendingPosition
-      ? '緯度 ' + pendingPosition.latitude.toFixed(6) + ' / 経度 ' + pendingPosition.longitude.toFixed(6)
-      : '位置情報は取得できませんでした';
+    editInfo.textContent = 'この記録は地図上で #' + pendingNumber + ' として表示されます / ' +
+      (pendingPosition
+        ? '緯度 ' + pendingPosition.latitude.toFixed(6) + ' / 経度 ' + pendingPosition.longitude.toFixed(6)
+        : '位置情報は取得できませんでした');
     memo.value = '';
 
     cameraPanel.style.display = 'none';
@@ -438,6 +502,7 @@
   saveSpotBtn.addEventListener('click', () => {
     const spot = {
       id: Date.now(),
+      number: pendingNumber,
       timestamp: pendingTimestamp,
       lat: pendingPosition ? pendingPosition.latitude : null,
       lng: pendingPosition ? pendingPosition.longitude : null,
@@ -452,9 +517,11 @@
       status.textContent = '保存容量がいっぱいの可能性があります: ' + e.message;
     }
 
+    if (routeMap) renderSpotMarkers(); // 地図が既に開かれていれば、新しいピンをすぐ反映する
+
     cameraPanel.style.display = 'block';
     editPanel.style.display = 'none';
-    status.textContent = '記録を保存しました。次の場所へ進みましょう。';
+    status.textContent = '記録を保存しました(#' + spot.number + ')。次の場所へ進みましょう。';
   });
 
   // ---- 音声入力 ----
@@ -516,6 +583,7 @@
 
   let routeMap = null;
   let routePolyline = null;
+  let spotMarkersLayer = null;
   let currentWalk = null; // 記録中の散歩 { id, startedAt, path: [{lat,lng,t}] }
   let selectedWalkId = null; // 一覧から選んで地図表示中の過去の散歩
 
@@ -560,6 +628,8 @@
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(routeMap);
     routePolyline = L.polyline([], { color: '#2a7a4b' }).addTo(routeMap);
+    spotMarkersLayer = L.layerGroup().addTo(routeMap);
+    renderSpotMarkers();
 
     if (currentWalk && currentWalk.path.length > 0) {
       // 復元された記録中の散歩があれば、その軌跡を地図にも反映する
@@ -650,6 +720,30 @@
   }
   restoreInProgressWalk();
 
+  // 撮影した写真の場所を、番号付きピンとして地図に表示する
+  function renderSpotMarkers() {
+    if (!spotMarkersLayer) return;
+    spotMarkersLayer.clearLayers();
+
+    spots.filter((s) => s.lat != null).forEach((spot) => {
+      const icon = L.divIcon({
+        className: 'spot-pin',
+        html: '<span>' + spot.number + '</span>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+      const marker = L.marker([spot.lat, spot.lng], { icon }).addTo(spotMarkersLayer);
+      const time = new Date(spot.timestamp).toLocaleString('ja-JP');
+      marker.bindPopup(
+        '<div style="font-size:12px;">' +
+          '<img src="' + spot.photo + '" style="width:100%;max-width:160px;border-radius:6px;margin-bottom:4px;display:block;" />' +
+          '#' + spot.number + ' ・ ' + time + '<br>' +
+          (spot.memo ? escapeHtml(spot.memo).slice(0, 60) : '(メモなし)') +
+        '</div>'
+      );
+    });
+  }
+
   function showWalkOnMap(walk) {
     selectedWalkId = walk.id;
     const latlngs = walk.path.map((p) => [p.lat, p.lng]);
@@ -681,6 +775,7 @@
   const spotCount = document.getElementById('spotCount');
   const emptySpots = document.getElementById('emptySpots');
   const clearAllBtn = document.getElementById('clearAllBtn');
+  const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
 
   function renderSpots() {
     spotCount.textContent = spots.length;
@@ -693,13 +788,27 @@
       const time = new Date(spot.timestamp).toLocaleString('ja-JP');
       const locText = (spot.lat != null) ? spot.lat.toFixed(5) + ', ' + spot.lng.toFixed(5) : '位置情報なし';
       card.innerHTML =
-        '<img src="' + spot.photo + '" alt="記録した写真" />' +
+        '<input type="checkbox" class="spot-select" value="' + spot.id + '" />' +
+        '<div class="spot-thumb">' +
+          '<img src="' + spot.photo + '" alt="記録した写真" />' +
+          '<span class="spot-number">#' + spot.number + '</span>' +
+        '</div>' +
         '<div class="spot-info">' + time + '<br>' + locText +
           '<div class="memo">' + (spot.memo ? escapeHtml(spot.memo) : '(メモなし)') + '</div>' +
         '</div>';
       spotList.appendChild(card);
     });
   }
+
+  deleteSelectedBtn.addEventListener('click', () => {
+    const checked = [...spotList.querySelectorAll('.spot-select:checked')].map((cb) => Number(cb.value));
+    if (checked.length === 0) { alert('削除する記録を選んでください。'); return; }
+    if (!confirm(checked.length + '件の記録を削除します。よろしいですか？')) return;
+
+    spots = spots.filter((s) => !checked.includes(s.id));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(spots));
+    renderSpots();
+  });
 
   clearAllBtn.addEventListener('click', () => {
     if (!confirm('全ての記録を削除します。よろしいですか？')) return;
@@ -726,7 +835,10 @@
       const time = new Date(spot.timestamp).toLocaleString('ja-JP');
       row.innerHTML =
         '<input type="checkbox" value="' + spot.id + '" />' +
-        '<img src="' + spot.photo + '" alt="記録した写真" />' +
+        '<div class="spot-thumb">' +
+          '<img src="' + spot.photo + '" alt="記録した写真" />' +
+          '<span class="spot-number">#' + spot.number + '</span>' +
+        '</div>' +
         '<div class="info">' + time +
           '<div class="memo">' + (spot.memo ? escapeHtml(spot.memo).slice(0, 40) : '(メモなし)') + '</div>' +
         '</div>';
@@ -795,6 +907,10 @@
   }
 
   renderSpots();
+
+  // 初期表示が「ルート」タブなので、地図もページ読み込み時点で初期化しておく
+  initRouteMapIfNeeded();
+  renderWalks();
 </script>
 
 </body>
