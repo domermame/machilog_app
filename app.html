@@ -267,9 +267,11 @@
         panel.classList.toggle('active', key === target);
       });
 
-      // カメラは最初に「撮る」タブが開かれた時だけ起動する(許可ダイアログを不要に何度も出さないため)
-      if (target === 'record' && !cameraStarted) {
-        startCamera();
+      // 「撮る」タブにいる間だけカメラを起動し、離れたら停止する(発熱・電池消耗を抑えるため)
+      if (target === 'record') {
+        if (!cameraStarted) startCamera();
+      } else {
+        if (cameraStarted) stopCamera();
       }
       // 一覧・アルバムタブは開くたびに最新のデータで再描画する
       if (target === 'list') renderSpots();
@@ -302,6 +304,7 @@
   let pendingPhotoDataUrl = null;
   let pendingPosition = null;
   let pendingTimestamp = null;
+  let cameraStream = null;
 
   function startCamera() {
     cameraStarted = true;
@@ -309,6 +312,7 @@
       video: { facingMode: { ideal: 'environment' } },
       audio: false
     }).then((stream) => {
+      cameraStream = stream;
       video.srcObject = stream;
       status.textContent = 'カメラが起動しました。撮影ボタンを押してください。';
       shootBtn.disabled = false;
@@ -316,6 +320,19 @@
       status.textContent = 'カメラを起動できませんでした: ' + err.message;
     });
   }
+
+  // 他のタブを見ている間もカメラを起動したままだと発熱・電池消耗の原因になるため、
+  // 「撮る」タブを離れたらカメラのハードウェアごと完全に停止する
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      cameraStream = null;
+    }
+    video.srcObject = null;
+    cameraStarted = false;
+    shootBtn.disabled = true;
+  }
+
   startCamera(); // 最初のタブなので即起動
 
   if (navigator.geolocation) {
