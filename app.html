@@ -264,6 +264,45 @@
   }
   .tabbar button:active { opacity: 1; background: var(--color-bg-secondary); }
   .tabbar button.active { color: var(--color-green-text); font-weight: 700; background: var(--color-green-bg); }
+
+  /* ---- アルバム詳細・写真拡大のオーバーレイ ---- */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: var(--color-bg);
+    overflow-y: auto;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  .overlay-title { font-size: 17px; font-weight: 700; margin: 10px 0 2px; }
+  .overlay-meta { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; }
+
+  #albumDetailMap {
+    width: 100%;
+    max-width: 480px;
+    height: 220px;
+    border-radius: var(--radius-lg);
+    border: 0.5px solid var(--color-border);
+    margin-bottom: 14px;
+  }
+  .album-photos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    max-width: 480px;
+  }
+  .album-photos-grid .spot-thumb { width: 100%; aspect-ratio: 1; cursor: pointer; }
+  .album-photos-grid img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
+
+  #photoDetailImg {
+    width: 100%;
+    max-width: 480px;
+    border-radius: var(--radius-lg);
+    margin: 10px 0 14px;
+    display: block;
+  }
+  #photoDetailInfo { font-size: 14px; line-height: 1.8; max-width: 480px; }
 </style>
 </head>
 <body>
@@ -343,6 +382,22 @@
   <button data-tab="list">📋 記録一覧</button>
   <button data-tab="album">📖 アルバム</button>
 </nav>
+
+<!-- ============ アルバム詳細(ルート+写真グリッド) ============ -->
+<div id="albumDetailOverlay" class="overlay">
+  <button id="albumDetailBackBtn" class="secondary">← アルバム一覧に戻る</button>
+  <h2 id="albumDetailTitle" class="overlay-title"></h2>
+  <p id="albumDetailMeta" class="overlay-meta"></p>
+  <div id="albumDetailMap"></div>
+  <div id="albumDetailPhotos" class="album-photos-grid"></div>
+</div>
+
+<!-- ============ 写真拡大表示 ============ -->
+<div id="photoDetailOverlay" class="overlay">
+  <button id="photoDetailBackBtn" class="secondary">← 戻る</button>
+  <img id="photoDetailImg" alt="撮影した写真" />
+  <p id="photoDetailInfo"></p>
+</div>
 
 <script>
   const STORAGE_KEY = 'machilog_walk_demo_spots';
@@ -895,13 +950,21 @@
         '<h3>' + escapeHtml(album.title) + '</h3>' +
         '<div class="album-meta">作成日: ' + created + ' / 写真 ' + album.spots.length + '枚</div>' +
         '<div class="album-photos">' + photosHtml + '</div>' +
-        '<button class="danger" data-id="' + album.id + '">このアルバムを削除</button>';
+        '<button data-view-id="' + album.id + '">このアルバムを見る</button>' +
+        '<button class="danger" data-delete-id="' + album.id + '">このアルバムを削除</button>';
       albumList.appendChild(card);
     });
 
-    albumList.querySelectorAll('button[data-id]').forEach((btn) => {
+    albumList.querySelectorAll('button[data-view-id]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const id = Number(btn.dataset.id);
+        const album = albums.find((a) => a.id === Number(btn.dataset.viewId));
+        if (album) showAlbumDetail(album);
+      });
+    });
+
+    albumList.querySelectorAll('button[data-delete-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.deleteId);
         if (!confirm('このアルバムを削除します。よろしいですか？')) return;
         albums = albums.filter((a) => a.id !== id);
         localStorage.setItem(ALBUMS_KEY, JSON.stringify(albums));
@@ -909,6 +972,106 @@
       });
     });
   }
+
+  // ============ アルバム詳細(ルート・写真グリッド・拡大表示) ============
+  const albumDetailOverlay = document.getElementById('albumDetailOverlay');
+  const albumDetailTitle = document.getElementById('albumDetailTitle');
+  const albumDetailMeta = document.getElementById('albumDetailMeta');
+  const albumDetailPhotos = document.getElementById('albumDetailPhotos');
+  const albumDetailBackBtn = document.getElementById('albumDetailBackBtn');
+  const photoDetailOverlay = document.getElementById('photoDetailOverlay');
+  const photoDetailImg = document.getElementById('photoDetailImg');
+  const photoDetailInfo = document.getElementById('photoDetailInfo');
+  const photoDetailBackBtn = document.getElementById('photoDetailBackBtn');
+
+  let albumDetailMap = null;
+
+  // アルバムの写真の時刻が、記録済みの散歩(walks)のどれとほぼ重なるかを調べて、
+  // 一致する散歩があればその実際の歩行ルートを地図に重ねて表示する
+  function findMatchingWalk(album) {
+    let bestWalk = null;
+    let bestCount = 0;
+    walks.forEach((walk) => {
+      const start = new Date(walk.startedAt).getTime();
+      const end = new Date(walk.endedAt).getTime();
+      const count = album.spots.filter((s) => {
+        const t = new Date(s.timestamp).getTime();
+        return t >= start && t <= end;
+      }).length;
+      if (count > bestCount) { bestCount = count; bestWalk = walk; }
+    });
+    return bestCount > 0 ? bestWalk : null;
+  }
+
+  function showAlbumDetail(album) {
+    albumDetailTitle.textContent = album.title;
+    const created = new Date(album.createdAt).toLocaleString('ja-JP');
+    albumDetailMeta.textContent = '作成日: ' + created + ' / 写真 ' + album.spots.length + '枚';
+
+    albumDetailPhotos.innerHTML = '';
+    album.spots.forEach((spot, index) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'spot-thumb album-detail-thumb';
+      thumb.innerHTML =
+        '<img src="' + spot.photo + '" alt="記録した写真" />' +
+        '<span class="spot-number">#' + spot.number + '</span>';
+      thumb.addEventListener('click', () => openPhotoDetail(album, index));
+      albumDetailPhotos.appendChild(thumb);
+    });
+
+    // 詳細を開くたびに地図を作り直す(アルバムごとに表示内容が大きく変わるため)
+    if (albumDetailMap) { albumDetailMap.remove(); albumDetailMap = null; }
+    albumDetailMap = L.map('albumDetailMap');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(albumDetailMap);
+
+    const bounds = [];
+    const matchingWalk = findMatchingWalk(album);
+    if (matchingWalk) {
+      const routeLatLngs = matchingWalk.path.map((p) => [p.lat, p.lng]);
+      L.polyline(routeLatLngs, { color: '#2a7a4b', weight: 3, opacity: 0.6 }).addTo(albumDetailMap);
+      bounds.push(...routeLatLngs);
+    }
+
+    album.spots.filter((s) => s.lat != null).forEach((spot) => {
+      const icon = L.divIcon({
+        className: 'spot-pin',
+        html: '<span>' + spot.number + '</span>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+      L.marker([spot.lat, spot.lng], { icon }).addTo(albumDetailMap);
+      bounds.push([spot.lat, spot.lng]);
+    });
+
+    if (bounds.length > 0) {
+      albumDetailMap.fitBounds(bounds, { padding: [24, 24] });
+    } else {
+      albumDetailMap.setView([35.681236, 139.767125], 15);
+    }
+
+    albumDetailOverlay.style.display = 'block';
+    setTimeout(() => albumDetailMap.invalidateSize(), 0);
+  }
+
+  albumDetailBackBtn.addEventListener('click', () => {
+    albumDetailOverlay.style.display = 'none';
+  });
+
+  function openPhotoDetail(album, index) {
+    const spot = album.spots[index];
+    const time = new Date(spot.timestamp).toLocaleString('ja-JP');
+    photoDetailImg.src = spot.photo;
+    photoDetailInfo.innerHTML =
+      '<strong>#' + spot.number + '</strong> ・ ' + time + '<br>' +
+      (spot.memo ? escapeHtml(spot.memo) : '(メモなし)');
+    photoDetailOverlay.style.display = 'block';
+  }
+
+  photoDetailBackBtn.addEventListener('click', () => {
+    photoDetailOverlay.style.display = 'none';
+  });
 
   function escapeHtml(str) {
     const div = document.createElement('div');
