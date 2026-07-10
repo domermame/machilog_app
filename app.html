@@ -455,10 +455,22 @@
   const walkList = document.getElementById('walkList');
   const emptyWalks = document.getElementById('emptyWalks');
 
+  const IN_PROGRESS_KEY = 'machilog_current_walk_demo';
+
   let routeMap = null;
   let routePolyline = null;
   let currentWalk = null; // 記録中の散歩 { id, startedAt, path: [{lat,lng,t}] }
   let selectedWalkId = null; // 一覧から選んで地図表示中の過去の散歩
+
+  // 記録中の散歩は地点を追加するたびに保存しておく。Safariがタブを破棄してページが
+  // 再読み込みされても、メモリ上だけにあったcurrentWalkが消えてしまわないようにするため
+  function saveInProgressWalk() {
+    if (currentWalk) {
+      localStorage.setItem(IN_PROGRESS_KEY, JSON.stringify(currentWalk));
+    } else {
+      localStorage.removeItem(IN_PROGRESS_KEY);
+    }
+  }
 
   // 2点間の距離をメートルで計算(緯度経度から距離を出す定番の式)
   function haversineMeters(lat1, lng1, lat2, lng2) {
@@ -492,7 +504,12 @@
     }).addTo(routeMap);
     routePolyline = L.polyline([], { color: '#2a7a4b' }).addTo(routeMap);
 
-    if (lastPosition) {
+    if (currentWalk && currentWalk.path.length > 0) {
+      // 復元された記録中の散歩があれば、その軌跡を地図にも反映する
+      const latlngs = currentWalk.path.map((p) => [p.lat, p.lng]);
+      routePolyline.setLatLngs(latlngs);
+      routeMap.fitBounds(routePolyline.getBounds(), { padding: [20, 20] });
+    } else if (lastPosition) {
       routeMap.setView([lastPosition.latitude, lastPosition.longitude], 16);
     }
   }
@@ -511,6 +528,7 @@
     }
 
     currentWalk.path.push({ lat: coords.latitude, lng: coords.longitude, t: now });
+    saveInProgressWalk();
     updateRouteLive();
   }
 
@@ -537,6 +555,7 @@
       routePolyline.setLatLngs([]);
       walkToggleBtn.textContent = '散歩終了';
       walkToggleBtn.classList.add('danger');
+      saveInProgressWalk();
       updateRouteLive();
     } else {
       // 散歩終了 → 保存
@@ -554,12 +573,25 @@
         localStorage.setItem(WALKS_KEY, JSON.stringify(walks));
       }
       currentWalk = null;
+      saveInProgressWalk(); // currentWalkがnullになったので、記録中データを消す
       walkToggleBtn.textContent = '散歩スタート';
       walkToggleBtn.classList.remove('danger');
       routeStatus.textContent = '「散歩スタート」を押すと、歩いた道を記録します。';
       renderWalks();
     }
   });
+
+  // ページを開いた時点で、前回記録中だった散歩(中断された散歩)があれば復元する
+  function restoreInProgressWalk() {
+    const saved = localStorage.getItem(IN_PROGRESS_KEY);
+    if (!saved) return;
+
+    currentWalk = JSON.parse(saved);
+    walkToggleBtn.textContent = '散歩終了';
+    walkToggleBtn.classList.add('danger');
+    updateRouteLive(); // 記録中の地点数・距離を表示する(routeStatusはここで更新される)
+  }
+  restoreInProgressWalk();
 
   function showWalkOnMap(walk) {
     selectedWalkId = walk.id;
