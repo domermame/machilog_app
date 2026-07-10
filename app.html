@@ -461,6 +461,7 @@
         gpsStatus.textContent = '位置情報 取得済み (精度 約' + Math.round(pos.coords.accuracy) + 'm)';
         gpsStatus.classList.remove('waiting');
         maybeAddRoutePoint(pos.coords);
+        centerMapOnFirstFixIfNeeded(pos.coords);
       },
       (err) => { gpsStatus.textContent = '位置情報 取得失敗: ' + err.message; },
       { enableHighAccuracy: true }
@@ -586,6 +587,15 @@
   let spotMarkersLayer = null;
   let currentWalk = null; // 記録中の散歩 { id, startedAt, path: [{lat,lng,t}] }
   let selectedWalkId = null; // 一覧から選んで地図表示中の過去の散歩
+  let hasCenteredOnCurrentLocation = false;
+
+  // 地図はページ読み込み時点(まだGPSが取れていない)に東京駅付近で初期化されるため、
+  // 最初の現在地が取れた時点で一度だけ地図をそこへ移動する(記録中・過去の散歩表示中は動かさない)
+  function centerMapOnFirstFixIfNeeded(coords) {
+    if (hasCenteredOnCurrentLocation || !routeMap || currentWalk || selectedWalkId) return;
+    hasCenteredOnCurrentLocation = true;
+    routeMap.setView([coords.latitude, coords.longitude], 16);
+  }
 
   // 記録中の散歩は地点を追加するたびに保存しておく。Safariがタブを破棄してページが
   // 再読み込みされても、メモリ上だけにあったcurrentWalkが消えてしまわないようにするため
