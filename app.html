@@ -186,6 +186,23 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.35);
   }
 
+  /* 散歩の開始(S)・終了(G)地点マーカー */
+  .walk-marker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    border: 2px solid var(--color-bg);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  }
+  .walk-marker.start { background: #2a6fdb; }
+  .walk-marker.end { background: var(--color-danger); }
+
   .album-card {
     background: var(--color-bg);
     border: 0.5px solid var(--color-border);
@@ -640,6 +657,7 @@
   let routeMap = null;
   let routePolyline = null;
   let spotMarkersLayer = null;
+  let walkMarkersLayer = null;
   let currentWalk = null; // 記録中の散歩 { id, startedAt, path: [{lat,lng,t}] }
   let selectedWalkId = null; // 一覧から選んで地図表示中の過去の散歩
   let hasCenteredOnCurrentLocation = false;
@@ -694,15 +712,43 @@
     }).addTo(routeMap);
     routePolyline = L.polyline([], { color: '#2a7a4b' }).addTo(routeMap);
     spotMarkersLayer = L.layerGroup().addTo(routeMap);
+    walkMarkersLayer = L.layerGroup().addTo(routeMap);
     renderSpotMarkers();
 
     if (currentWalk && currentWalk.path.length > 0) {
-      // 復元された記録中の散歩があれば、その軌跡を地図にも反映する
+      // 復元された記録中の散歩があれば、その軌跡を地図にも反映する(まだ終了していないのでSのみ)
       const latlngs = currentWalk.path.map((p) => [p.lat, p.lng]);
       routePolyline.setLatLngs(latlngs);
+      renderWalkMarkers(currentWalk.path, false);
       routeMap.fitBounds(routePolyline.getBounds(), { padding: [20, 20] });
     } else if (lastPosition) {
       routeMap.setView([lastPosition.latitude, lastPosition.longitude], 16);
+    }
+  }
+
+  // 散歩の開始地点(S)・終了地点(G)を地図上にマーカーで示す。includeEndがfalseの間は記録中でまだ終了していない
+  function renderWalkMarkers(path, includeEnd) {
+    if (!walkMarkersLayer) return;
+    walkMarkersLayer.clearLayers();
+    if (!path || path.length === 0) return;
+
+    const startIcon = L.divIcon({
+      className: 'walk-marker start',
+      html: 'S',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+    L.marker([path[0].lat, path[0].lng], { icon: startIcon }).addTo(walkMarkersLayer);
+
+    if (includeEnd && path.length > 1) {
+      const endIcon = L.divIcon({
+        className: 'walk-marker end',
+        html: 'G',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+      const last = path[path.length - 1];
+      L.marker([last.lat, last.lng], { icon: endIcon }).addTo(walkMarkersLayer);
     }
   }
 
@@ -731,6 +777,7 @@
     if (routeMap) {
       const latlngs = currentWalk.path.map((p) => [p.lat, p.lng]);
       routePolyline.setLatLngs(latlngs);
+      renderWalkMarkers(currentWalk.path, false);
       if (latlngs.length > 0) routeMap.panTo(latlngs[latlngs.length - 1]);
     }
   }
@@ -763,6 +810,7 @@
         };
         walks.push(walk);
         localStorage.setItem(WALKS_KEY, JSON.stringify(walks));
+        renderWalkMarkers(walk.path, true); // 終了したのでS・G両方を表示する
       }
       currentWalk = null;
       saveInProgressWalk(); // currentWalkがnullになったので、記録中データを消す
@@ -785,34 +833,44 @@
   }
   restoreInProgressWalk();
 
+  // 番号ピンを地図上に作る共通処理。タップ→写真付きのミニポップアップ→その写真をタップで拡大表示、という2段階にする
+  function addSpotMarker(target, spot) {
+    const icon = L.divIcon({
+      className: 'spot-pin',
+      html: '<span>' + spot.number + '</span>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+    const marker = L.marker([spot.lat, spot.lng], { icon }).addTo(target);
+    const time = new Date(spot.timestamp).toLocaleString('ja-JP');
+    marker.bindPopup(
+      '<div style="font-size:12px; text-align:center;">' +
+        '<img src="' + spot.photo + '" class="popup-photo" style="width:100%;max-width:160px;border-radius:6px;margin-bottom:4px;display:block;cursor:pointer;" />' +
+        '#' + spot.number + ' ・ ' + time + '<br>' +
+        (spot.memo ? escapeHtml(spot.memo).slice(0, 60) : '(メモなし)') +
+      '</div>'
+    );
+    // 同じ写真が複数の地図(ルート・アルバム詳細)に同時に存在しうるため、id参照ではなく
+    // このポップアップのDOM要素の中だけを探すことで、他の地図の要素と衝突しないようにする
+    marker.on('popupopen', (e) => {
+      const img = e.popup.getElement().querySelector('.popup-photo');
+      if (img) img.addEventListener('click', () => openSpotPhotoDetail(spot));
+    });
+    return marker;
+  }
+
   // 撮影した写真の場所を、番号付きピンとして地図に表示する
   function renderSpotMarkers() {
     if (!spotMarkersLayer) return;
     spotMarkersLayer.clearLayers();
-
-    spots.filter((s) => s.lat != null).forEach((spot) => {
-      const icon = L.divIcon({
-        className: 'spot-pin',
-        html: '<span>' + spot.number + '</span>',
-        iconSize: [26, 26],
-        iconAnchor: [13, 13]
-      });
-      const marker = L.marker([spot.lat, spot.lng], { icon }).addTo(spotMarkersLayer);
-      const time = new Date(spot.timestamp).toLocaleString('ja-JP');
-      marker.bindPopup(
-        '<div style="font-size:12px;">' +
-          '<img src="' + spot.photo + '" style="width:100%;max-width:160px;border-radius:6px;margin-bottom:4px;display:block;" />' +
-          '#' + spot.number + ' ・ ' + time + '<br>' +
-          (spot.memo ? escapeHtml(spot.memo).slice(0, 60) : '(メモなし)') +
-        '</div>'
-      );
-    });
+    spots.filter((s) => s.lat != null).forEach((spot) => addSpotMarker(spotMarkersLayer, spot));
   }
 
   function showWalkOnMap(walk) {
     selectedWalkId = walk.id;
     const latlngs = walk.path.map((p) => [p.lat, p.lng]);
     routePolyline.setLatLngs(latlngs);
+    renderWalkMarkers(walk.path, true);
     if (latlngs.length > 0) {
       routeMap.fitBounds(routePolyline.getBounds(), { padding: [20, 20] });
     }
@@ -1009,13 +1067,13 @@
     albumDetailMeta.textContent = '作成日: ' + created + ' / 写真 ' + album.spots.length + '枚';
 
     albumDetailPhotos.innerHTML = '';
-    album.spots.forEach((spot, index) => {
+    album.spots.forEach((spot) => {
       const thumb = document.createElement('div');
       thumb.className = 'spot-thumb album-detail-thumb';
       thumb.innerHTML =
         '<img src="' + spot.photo + '" alt="記録した写真" />' +
         '<span class="spot-number">#' + spot.number + '</span>';
-      thumb.addEventListener('click', () => openPhotoDetail(album, index));
+      thumb.addEventListener('click', () => openSpotPhotoDetail(spot));
       albumDetailPhotos.appendChild(thumb);
     });
 
@@ -1032,21 +1090,23 @@
       const routeLatLngs = matchingWalk.path.map((p) => [p.lat, p.lng]);
       L.polyline(routeLatLngs, { color: '#2a7a4b', weight: 3, opacity: 0.6 }).addTo(albumDetailMap);
       bounds.push(...routeLatLngs);
+
+      const startIcon = L.divIcon({ className: 'walk-marker start', html: 'S', iconSize: [24, 24], iconAnchor: [12, 12] });
+      L.marker(routeLatLngs[0], { icon: startIcon }).addTo(albumDetailMap);
+      if (routeLatLngs.length > 1) {
+        const endIcon = L.divIcon({ className: 'walk-marker end', html: 'G', iconSize: [24, 24], iconAnchor: [12, 12] });
+        L.marker(routeLatLngs[routeLatLngs.length - 1], { icon: endIcon }).addTo(albumDetailMap);
+      }
     }
 
     album.spots.filter((s) => s.lat != null).forEach((spot) => {
-      const icon = L.divIcon({
-        className: 'spot-pin',
-        html: '<span>' + spot.number + '</span>',
-        iconSize: [26, 26],
-        iconAnchor: [13, 13]
-      });
-      L.marker([spot.lat, spot.lng], { icon }).addTo(albumDetailMap);
+      addSpotMarker(albumDetailMap, spot);
       bounds.push([spot.lat, spot.lng]);
     });
 
     if (bounds.length > 0) {
-      albumDetailMap.fitBounds(bounds, { padding: [24, 24] });
+      // 写真だけに寄りすぎず、歩いたルート全体が見渡せるよう余白を広めに取る
+      albumDetailMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
     } else {
       albumDetailMap.setView([35.681236, 139.767125], 15);
     }
@@ -1059,8 +1119,8 @@
     albumDetailOverlay.style.display = 'none';
   });
 
-  function openPhotoDetail(album, index) {
-    const spot = album.spots[index];
+  // 番号ピン・写真グリッドどちらからでも呼べる共通の写真拡大表示
+  function openSpotPhotoDetail(spot) {
     const time = new Date(spot.timestamp).toLocaleString('ja-JP');
     photoDetailImg.src = spot.photo;
     photoDetailInfo.innerHTML =
