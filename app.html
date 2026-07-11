@@ -330,7 +330,7 @@
     }
     .no-print { display: none !important; }
     .print-only { display: block !important; }
-    #albumDetailMap { max-width: 100%; height: 320px; }
+    #albumDetailMap { max-width: 100%; width: 100%; height: 420px; }
   }
 
   #photoDetailImg {
@@ -1074,6 +1074,7 @@
   });
 
   let albumDetailMap = null;
+  let albumMapBounds = null;
 
   // アルバムの写真の時刻が、記録済みの散歩(walks)のどれとほぼ重なるかを調べて、
   // 一致する散歩があればその実際の歩行ルートを地図に重ねて表示する
@@ -1152,18 +1153,37 @@
       bounds.push([spot.lat, spot.lng]);
     });
 
-    if (bounds.length > 1) {
-      // 写真だけに寄りすぎず、歩いたルート全体が見渡せるよう余白を広めに取る
-      albumDetailMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
-    } else if (bounds.length === 1) {
+    albumMapBounds = bounds;
+    albumDetailMap.invalidateSize();
+    fitAlbumMap(50);
+  }
+
+  // 画面表示用・印刷用でコンテナのサイズが異なるため、その都度呼び出して範囲を合わせ直せるようにする
+  function fitAlbumMap(paddingPx) {
+    if (!albumDetailMap || !albumMapBounds) return;
+    if (albumMapBounds.length > 1) {
+      // 写真だけに寄りすぎず、歩いたルート全体が見渡せるよう余白を取る(印刷時は狭めにして広く見せる)
+      albumDetailMap.fitBounds(albumMapBounds, { padding: [paddingPx, paddingPx], maxZoom: 17 });
+    } else if (albumMapBounds.length === 1) {
       // 地点が1つだけだとfitBoundsの範囲がゼロになり表示が崩れるため、setViewを使う
-      albumDetailMap.setView(bounds[0], 16);
+      albumDetailMap.setView(albumMapBounds[0], 16);
     } else {
       albumDetailMap.setView([35.681236, 139.767125], 15);
     }
-
-    albumDetailMap.invalidateSize();
   }
+
+  // 印刷開始時、地図コンテナのサイズが画面表示時と変わるため、Leafletにサイズ再計算と
+  // 範囲の再フィットをさせないと、印刷結果でルートが小さく偏って表示されてしまう
+  window.addEventListener('beforeprint', () => {
+    if (!albumDetailMap) return;
+    albumDetailMap.invalidateSize();
+    fitAlbumMap(20);
+  });
+  window.addEventListener('afterprint', () => {
+    if (!albumDetailMap) return;
+    albumDetailMap.invalidateSize();
+    fitAlbumMap(50);
+  });
 
   albumDetailBackBtn.addEventListener('click', () => {
     albumDetailOverlay.style.display = 'none';
