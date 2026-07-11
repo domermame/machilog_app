@@ -313,6 +313,26 @@
   .album-photos-grid .spot-thumb { width: 100%; aspect-ratio: 1; cursor: pointer; }
   .album-photos-grid img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
 
+  /* 印刷(PDF化)専用のメモ一覧。画面では非表示にしておき、@media printでだけ表示する */
+  .print-only { display: none; }
+  .print-entry { display: flex; gap: 12px; margin-bottom: 14px; max-width: 480px; }
+  .print-entry img { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+  .print-entry .print-info { font-size: 13px; line-height: 1.6; }
+  .print-entry .print-info .memo { margin-top: 4px; }
+
+  @media print {
+    body > *:not(#albumDetailOverlay) { display: none !important; }
+    #albumDetailOverlay {
+      display: block !important;
+      position: static;
+      overflow: visible;
+      padding: 0;
+    }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    #albumDetailMap { max-width: 100%; height: 320px; }
+  }
+
   #photoDetailImg {
     width: 100%;
     max-width: 480px;
@@ -403,11 +423,15 @@
 
 <!-- ============ アルバム詳細(ルート+写真グリッド) ============ -->
 <div id="albumDetailOverlay" class="overlay">
-  <button id="albumDetailBackBtn" class="secondary">← アルバム一覧に戻る</button>
+  <button id="albumDetailBackBtn" class="secondary no-print">← アルバム一覧に戻る</button>
+  <button id="albumPrintBtn" class="secondary no-print">🖨️ PDFで印刷する</button>
   <h2 id="albumDetailTitle" class="overlay-title"></h2>
   <p id="albumDetailMeta" class="overlay-meta"></p>
   <div id="albumDetailMap"></div>
-  <div id="albumDetailPhotos" class="album-photos-grid"></div>
+  <div id="albumDetailPhotos" class="album-photos-grid no-print"></div>
+
+  <!-- 画面には出さず、印刷(PDF化)時だけ表示する、メモを読める形にした一覧 -->
+  <div id="albumDetailPrintList" class="print-only"></div>
 </div>
 
 <!-- ============ 写真拡大表示 ============ -->
@@ -1037,11 +1061,17 @@
   const albumDetailTitle = document.getElementById('albumDetailTitle');
   const albumDetailMeta = document.getElementById('albumDetailMeta');
   const albumDetailPhotos = document.getElementById('albumDetailPhotos');
+  const albumDetailPrintList = document.getElementById('albumDetailPrintList');
   const albumDetailBackBtn = document.getElementById('albumDetailBackBtn');
+  const albumPrintBtn = document.getElementById('albumPrintBtn');
   const photoDetailOverlay = document.getElementById('photoDetailOverlay');
   const photoDetailImg = document.getElementById('photoDetailImg');
   const photoDetailInfo = document.getElementById('photoDetailInfo');
   const photoDetailBackBtn = document.getElementById('photoDetailBackBtn');
+
+  albumPrintBtn.addEventListener('click', () => {
+    window.print();
+  });
 
   let albumDetailMap = null;
 
@@ -1068,6 +1098,7 @@
     albumDetailMeta.textContent = '作成日: ' + created + ' / 写真 ' + album.spots.length + '枚';
 
     albumDetailPhotos.innerHTML = '';
+    albumDetailPrintList.innerHTML = '';
     album.spots.forEach((spot) => {
       const thumb = document.createElement('div');
       thumb.className = 'spot-thumb album-detail-thumb';
@@ -1076,6 +1107,18 @@
         '<span class="spot-number">#' + spot.number + '</span>';
       thumb.addEventListener('click', () => openSpotPhotoDetail(spot));
       albumDetailPhotos.appendChild(thumb);
+
+      // 印刷用は、サムネイルの番号バッジだけでなくメモの全文が読めるよう一覧形式にする
+      const time = new Date(spot.timestamp).toLocaleString('ja-JP');
+      const entry = document.createElement('div');
+      entry.className = 'print-entry';
+      entry.innerHTML =
+        '<img src="' + spot.photo + '" alt="記録した写真" />' +
+        '<div class="print-info">' +
+          '<strong>#' + spot.number + '</strong> ・ ' + time +
+          '<div class="memo">' + (spot.memo ? escapeHtml(spot.memo) : '(メモなし)') + '</div>' +
+        '</div>';
+      albumDetailPrintList.appendChild(entry);
     });
 
     // 地図のコンテナが display:none のまま初期化するとサイズを0として計算され、
